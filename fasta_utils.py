@@ -1,8 +1,10 @@
 from Bio import SeqIO
+import logging
 import math
 import os
 import random
-from typing import List, Tuple
+from typing import List, Tuple, Union
+from utils import hamming_distance
 
 def synthesize_sequence(
     s_length: int,
@@ -10,7 +12,7 @@ def synthesize_sequence(
     repeat_length: Tuple[int, int],
     repeat_coverage: float,
     repeat_noise: int,
-    verbose: bool = False
+    log: str = None
 ) -> List[str]:
     '''
     Generate a randomized nucleotide sequence with the given parameters.
@@ -27,8 +29,13 @@ def synthesize_sequence(
         repeat_noise (int): Maximum Hamming distance to randomize repeats with. Once a repeat is
             decided, the sequence will be populated with its variants that are at most this distance
             away from that repeat.
-        verbose (bool): If True, will print the repeats and where they have been placed
+        log (str): If provided, will output a log of the process to the provided path.
     '''
+    verbose = False
+    if log is not None:
+        verbose = True
+        logging.basicConfig(filename = log, level = logging.DEBUG)
+        
     BASES = ['A', 'G', 'T', 'C']
     vec = [None] * s_length
     total_populated = 0
@@ -37,27 +44,33 @@ def synthesize_sequence(
         l = random.randint(repeat_length[0], repeat_length[1])
         repeats.append(''.join(random.choices(BASES, k = l)))
     if verbose:
-        print('Generated the following base repeats:')
-        print(repeats)
+        logging.info('Generated the following base repeats:')
+        for i, repeat in enumerate(repeats):
+            logging.info('{}: {}'.format(i, repeat))
     repeat_coverage = repeat_coverage * s_length
     while total_populated < repeat_coverage:
         i = random.randrange(0, s_length)
         if vec[i] is not None:
             continue
-        repeat = random.choice(repeats)
+        repeat_i = random.randrange(len(repeats))
+        repeat = repeats[repeat_i]
         if i + len(repeat) >= s_length:
             continue
+        if verbose:
+            logging.info('Populating index {} with a modification on repeat number {}.'.format(i, repeat_i))
         n_modifs = random.randint(0, repeat_noise)
         modif_locs = random.choices(range(len(repeat)), k = n_modifs)
         for j in range(len(repeat)):
             if j in modif_locs:
-                vec[i + j] = random.choice(BASES)
+                vec[i + j] = random.choice([x for x in BASES if x != repeat[j]])
             else:
                 vec[i + j] = repeat[j]
         total_populated += len(repeat)
+        generated_repeat = ''.join(vec[i:i + len(repeat)])
         if verbose:
-            print('Index {} has been populated with the following:'.format(i))
-            print(''.join(vec[i:i + len(repeat)]))
+            logging.info('Randomized {} indices:\n{}'.format(n_modifs, modif_locs))
+            logging.info('Populated index with the following:\n{}'.format(generated_repeat))
+            logging.info('Current total repeat length: {}'.format(total_populated))
     for i in range(s_length):
         if vec[i] is None:
             vec[i] = random.choice(BASES)
@@ -122,7 +135,7 @@ def sequences_from_fasta(
     return ids, sequences
 
 def sequences_to_fasta(
-    sequences: List[str], 
+    sequences: Union[str, List[str]], 
     output_file: str,
     ids: List[str] = None
 ):
@@ -130,11 +143,13 @@ def sequences_to_fasta(
     Write a list of sequences to a FASTA file with auto-generated sequence IDs.
 
     Args:
-        sequences (list[str]): List of sequences.
+        sequences (list[str] | str): Sequence, or list of sequences.
         output_file (str): The name of the output FASTA file.
         ids (list[str]): IDs of the sequences in the outputted fasta file. If None,
             IDs will be sequential.
     '''
+    if type(sequences) == str:
+        sequences = [sequences]
     with open(output_file, 'w') as fasta_file:
         for i, sequence in enumerate(sequences):
             sequence_id = f'seq{i+1}'  # Generate a unique sequence ID

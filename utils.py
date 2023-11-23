@@ -127,7 +127,7 @@ def hamming_decide(str1, str2, m):
             return False
     return True
 
-def compute_seqlens(seqs: List[str]):
+def calculate_seqlens(seqs: List[str]):
     return [len(seq) for seq in seqs]
 
 def calculate_coverage(subs, l):

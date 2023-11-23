@@ -1,6 +1,5 @@
 from cluster_tools import ClusterHelper
 from fasta_utils import sequences_to_fasta, sequences_from_fasta
-import logging
 import multiprocessing as mp
 import os
 from pydivsufsort import divsufsort
@@ -14,6 +13,7 @@ from utils import *
     This file is meant to take care of picking baits for a set of sequences.
     The clustering should already be taken care of.
 '''
+
 def pick_baits_syotti(
     s: Union[str, List[str]], 
     l: int,
@@ -41,12 +41,18 @@ def pick_baits_syotti(
     start = time.time()
     if log is not None:
         verbose = True
-        logging.basicConfig(filename = log, level = logging.DEBUG)
+        f = open(log, 'w')
+        f.write('Picking baits with provided arguments:\n')
+        f.write('l (bait length) = {}\n'.format(l))
+        f.write('m (mismatch allowance) = {}\n'.format(m))
+        f.write('seed_length = {}\n'.format(seed_length))
+        f.write('rc (reverse complements) = {}\n'.format(seed_length))
+        f.write('--------\n')
     else:
         verbose = False
 
     if isinstance(s, list):
-        seqlens = compute_seqlens(s)
+        seqlens = calculate_seqlens(s)
         s = ''.join(s)
     else:
         seqlens = [len(s)]
@@ -56,7 +62,7 @@ def pick_baits_syotti(
     length = len(s)
     cov = [False] * length
     if verbose:
-        logging.info('Initialized bit array with length {}'.format(length))
+        f.write('Initialized bit array with length {}\n'.format(length))
 
     final_baits = []
     final_indices = []
@@ -72,21 +78,21 @@ def pick_baits_syotti(
             seqlens_ctr += 1
             current_seqend += seqlens[seqlens_ctr]
         if verbose:
-            logging.info('Index {} is not yet covered.'.format(i))
+            f.write('Index {} is not yet covered.\n'.format(i))
         # if this bait covers a concatenation spot, pick the last bait that doesn't
         if i > current_seqend - l:
             bait_start = current_seqend - l
             if verbose:
-                logging.info('Bait at {} would cover a concatenation spot at {}'.format(i, current_seqend))
+                f.write('Bait at {} would cover a concatenation spot at {}.\n'.format(i, current_seqend))
         else:
             bait_start = i
         if verbose:
-            logging.info('Aligning bait at {}'.format(bait_start))
+            f.write('Aligning bait at {}.\n'.format(bait_start))
         bait = s[bait_start: bait_start + l]
         matches = list(seed_and_extend(s, bait, m, sa, seed_length, seqlens))
         coverages = calculate_coverage(matches, l)
         if verbose:
-            logging.info('Bait covers between:\n {}'.format(coverages))
+            f.write('Bait covers between:\n {}\n'.format(coverages))
         for c in coverages:
             for j in range(c[0], c[1]):
                 cov[j] = True
@@ -98,15 +104,17 @@ def pick_baits_syotti(
             matches = list(seed_and_extend(s, bait, m, sa, seed_length, seqlens))
             coverages = calculate_coverage(matches, l)
             if verbose and len(coverages) > 0:
-                logging.info('Reverse complement covers between:\n {}'.format(coverages))
+                f.write('Reverse complement covers between:\n {}\n'.format(coverages))
             for c in coverages:
                 for j in range(c[0], c[1]):
                     cov[j] = True
     end = time.time()
-    print('Remaining uncovered indices: ', cov.count(False))
-    print('Picked {} baits in {} seconds.'.format(len(final_baits), end - start))
+    # print('Remaining uncovered indices: ', cov.count(False))
+    # print('Picked {} baits in {} seconds.'.format(len(final_baits), end - start))
     if verbose:
-        logging.info('Picked {} baits in {} seconds.'.format(len(final_baits), end - start))
+        f.write('Remaining uncovered indices: {}.\n'.format(cov.count(False)))
+        f.write('Picked {} baits in {} seconds.\n'.format(len(final_baits), end - start))
+        f.close()
     return final_indices, final_baits
 
 def pick_baits_syotti_smart(
@@ -137,12 +145,18 @@ def pick_baits_syotti_smart(
     start = time.time()
     if log is not None:
         verbose = True
-        logging.basicConfig(filename = log, level = logging.DEBUG)
+        f = open(log, 'w')
+        f.write('Picking baits with provided arguments:\n')
+        f.write('l (bait length) = {}\n'.format(l))
+        f.write('m (mismatch allowance) = {}\n'.format(m))
+        f.write('seed_length = {}\n'.format(seed_length))
+        f.write('rc (reverse complements) = {}\n'.format(seed_length))
+        f.write('--------\n')
     else:
         verbose = False
 
     if isinstance(s, list):
-        seqlens = compute_seqlens(s)
+        seqlens = calculate_seqlens(s)
         s = ''.join(s)
     else:
         seqlens = [len(s)]
@@ -152,7 +166,7 @@ def pick_baits_syotti_smart(
     length = len(s)
     cov = [False] * length
     if verbose:
-        logging.info('Initialized bit array with length {}'.format(length))
+        f.write('Initialized bit array with length {}.\n'.format(length))
 
     final_baits = []
     final_indices = []
@@ -170,20 +184,20 @@ def pick_baits_syotti_smart(
             seqlens_ctr += 1
             current_seqend += seqlens[seqlens_ctr]
         if verbose:
-            logging.info('Index {} is not yet covered.'.format(i))
+            f.write('Index {} is not yet covered.\n'.format(i))
         # if this bait covers a concatenation spot, pick the last bait that doesn't
         range_start = i - l + 1
         range_end = i
         if range_start < current_seqstart:
             range_start = current_seqstart
             if verbose:
-                logging.info('Baits after {} would cover a concatenation spot at {}'.format(range_start, current_seqstart))
+                f.write('Baits after {} would cover a concatenation spot at {}.\n'.format(range_start, current_seqstart))
         if range_end > current_seqend - l:
             range_end = current_seqend - l
             if verbose:
-                logging.info('Baits before {} would cover a concatenation spot at {}'.format(range_end, current_seqend))
+                f.write('Baits before {} would cover a concatenation spot at {}.\n'.format(range_end, current_seqend))
         if verbose:
-            logging.info('Considering baits from {} to {}'.format(range_start, range_end))
+            f.write('Considering baits from {} to {}.\n'.format(range_start, range_end))
         max_bait = None
         max_cov = 0
         max_index = -1
@@ -208,10 +222,12 @@ def pick_baits_syotti_smart(
             for j in range(c[0], c[1]):
                 cov[j] = True
     end = time.time()
-    print('Remaining uncovered indices: ', cov.count(False))
-    print('Picked {} baits in {} seconds.'.format(len(final_baits), end - start))
+    # print('Remaining uncovered indices: ', cov.count(False))
+    # print('Picked {} baits in {} seconds.'.format(len(final_baits), end - start))
     if verbose:
-        logging.info('Picked {} baits in {} seconds.'.format(len(final_baits), end - start))
+        f.write('Remaining uncovered indices: {}.\n'.format(cov.count(False)))
+        f.write('Picked {} baits in {} seconds.\n'.format(len(final_baits), end - start))
+        f.close()
     return final_indices, final_baits
 
 def pick_baits_vsearch(
@@ -236,7 +252,7 @@ def pick_baits_vsearch(
     '''
     if log is not None:
         verbose = True
-        logging.basicConfig(filename = log, level = logging.DEBUG)
+        f = open(log, 'w')
     else:
         verbose = False
     final_baits = set()
@@ -256,21 +272,22 @@ def pick_baits_vsearch(
     )
     
     if verbose:
-        logging.info('Created a cluster helper from provided map, with bait length {} and step size {}'.format(l, k))
+        f.write('Created a cluster helper from provided map, with bait length {} and step size {}.\n'.format(l, k))
     
     length = len(s)
     cov = [False] * length
     if verbose:
-        logging.info('Initialized bit array with length {}'.format(length))
+        f.write('Initialized bit array with length {}.\n'.format(length))
 
     prev = None
     indices = {0, length - 1}
     while indices:
         if verbose:
-            logging.info('Current endpoints to cover are {}'.format(str(indices)))
+            f.write('Current endpoints to cover are {}.\n'.format(str(indices)))
         if indices == prev:
             if verbose:
-                logging.error('No progress has been made since last interation - killing process')
+                f.write('No progress has been made since last interation - killing process.\n')
+                f.close()
             raise Exception('No progress has been made - killing process')
         prev = indices
         max_bait = -1
@@ -280,13 +297,13 @@ def pick_baits_vsearch(
         for i in indices: # hepsi yerine bir kismina bakilabilir
             baits = clusters.get_repr(i) # implement
             if verbose:
-                logging.info('Index {} is covered by baits {}'.format(str(i), str(baits)))
+                f.write('Index {} is covered by baits {}'.format(str(i), str(baits)))
             for bait in baits:
                 # if verbose:
-                #     logging.info('Checking bait {}'.format(str(bait)))
+                #     f.write('Checking bait {}.\n'.format(str(bait)))
                 if bait in checked_baits or bait in final_baits:
                     # if verbose:
-                    #     logging.info('Already checked or included - skipping bait')
+                    #     f.write('Already checked or included - skipping bait.\n')
                     continue
                 checked_baits.add(bait)
                 this_subs = calculate_coverage(clusters.get_subs(bait), l)
@@ -294,20 +311,20 @@ def pick_baits_vsearch(
                 for c in this_subs:
                     this_cov += cov[c[0]: c[1]].count(False)
                 # if verbose:
-                #     logging.info('Bait {} covers {} previously uncovered cells'.format(str(bait), str(this_cov)))
+                #     f.write('Bait {} covers {} previously uncovered cells.\n'.format(str(bait), str(this_cov)))
                 if this_cov > max_cov:
                     if verbose:
-                        logging.info('Bait {} is the new max coverage bait'.format(str(bait)))
+                        f.write('Bait {} is the new max coverage bait.\n'.format(str(bait)))
                     max_bait = bait
                     max_cov = this_cov
                     covered_subs = this_subs
         if verbose:
-            logging.info('Bait {} is the picked bait'.format(str(max_bait)))
+            f.write('Bait {} is the picked bait.\n'.format(str(max_bait)))
         for c in covered_subs:
             for i in range(c[0], c[1]):
                 cov[i] = True
             if verbose:
-                logging.info('Covered {} to {}'.format(str(c[0]), str(c[1])))
+                f.write('Covered {} to {}.\n'.format(str(c[0]), str(c[1])))
             indices_remove = set()
             for i in indices:
                 if i >= c[0] and i < c[1]:
@@ -318,7 +335,7 @@ def pick_baits_vsearch(
             if c[1] < length and not cov[c[1]]:
                 indices.add(c[1])
         if verbose:
-            logging.info('New indices are {}'.format(str(indices)))
+            f.write('New indices are {}.\n'.format(str(indices)))
         final_baits.add(max_bait)
     
     final_baits_list = list(final_baits)

@@ -50,12 +50,13 @@ def synthesize_sequence(
     repeat_coverage = repeat_coverage * s_length
     while total_populated < repeat_coverage:
         i = random.randrange(0, s_length)
-        if vec[i] is not None:
-            continue
         repeat_i = random.randrange(len(repeats))
         repeat = repeats[repeat_i]
         if i + len(repeat) >= s_length:
             continue
+        for j in range(len(repeat)):
+            if vec[i + j] is not None:
+                continue
         if verbose:
             logging.info('Populating index {} with a modification on repeat number {}.'.format(i, repeat_i))
         n_modifs = random.randint(0, repeat_noise)
@@ -65,7 +66,7 @@ def synthesize_sequence(
                 vec[i + j] = random.choice([x for x in BASES if x != repeat[j]])
             else:
                 vec[i + j] = repeat[j]
-        total_populated += len(repeat)
+        total_populated = len(vec) - vec.count(None)
         generated_repeat = ''.join(vec[i:i + len(repeat)])
         if verbose:
             logging.info('Randomized {} indices:\n{}'.format(n_modifs, modif_locs))

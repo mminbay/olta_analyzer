@@ -66,7 +66,7 @@ def seed_and_extend(
             seq_end += seqlen
             for match in seed_matches:
                 # find actual start of this alignment and check if it covers a concatenation
-                actual_start = match - 
+                actual_start = match - i
                 if actual_start in checked_indices:
                     discard_matches.add(match)
                     # print('discarded bc already checked')

@@ -413,24 +413,3 @@ if __name__ == '__main__':
     else:
         raise Exception('what')
         
-
-
-
-    # print('Starting to pick baits...')
-    # start = time.perf_counter()
-
-    # res = pick_baits_vsearch(
-    #     sequences, 
-    #     l, 
-    #     k, 
-    #     cluster_dir,
-    #     output,
-    #     log = output[:output.rfind('.')] + '.log'
-    # )
-
-    # end = time.perf_counter()
-    # print('Picked baits in {} seconds'.format(str(end - start)))
-    # print(sorted(list(res)))
-    # print(len(res))
-    # validate_baits(sequences, l, k, 40, res, cluster_dir)
-    # print('Validated baits in {} seconds'.format(str(end - time.perf_counter())))

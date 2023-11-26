@@ -44,7 +44,6 @@ def seed_and_extend(
     # lookup_time = 0
     # discard_time = 0
     # alignment_time = 0
-    # d_picked = 0
     # d_checked = 0
     # d_concat = 0
     # d_negative = 0
@@ -59,45 +58,48 @@ def seed_and_extend(
             continue
         seed_matches = set(sa[seed_matches[1]: seed_matches[0] + seed_matches[1]])
         # checkpoint = time.time()
-        sum_seqlens = 0
+        seq_start = 0
+        seq_end = 0
         for seqlen in seqlens:
             discard_matches = set()
-            sum_seqlens += seqlen
+            seq_start = seq_end
+            seq_end += seqlen
             for match in seed_matches:
                 # find actual start of this alignment and check if it covers a concatenation
-                actual_start = match - i
-                if actual_start in final_matches: # if we already checked the coverage
-                    discard_matches.add(match)     
-                    # d_picked += 1
-                elif actual_start in checked_indices:
+                actual_start = match - 
+                if actual_start in checked_indices:
                     discard_matches.add(match)
+                    # print('discarded bc already checked')
                     # d_checked += 1
                 elif actual_start < 0:
                     discard_matches.add(match)
+                    # print('discarded bc negative')
                     # d_negative += 1
-                elif actual_start < sum_seqlens and actual_start > sum_seqlens - lb:
+                elif actual_start < seq_end and actual_start > seq_end - lb:
                     discard_matches.add(match)
+                    # print('discarded bc concat spot')
                     # d_concat += 1
-                checked_indices.add(actual_start)
             seed_matches = seed_matches.difference(discard_matches) # VERY INEFFICIENT - change
         # discard_time += time.time() - checkpoint
         # checkpoint = time.time()
         for match in seed_matches:
             actual_start = match - i
+            checked_indices.add(actual_start)
             sub = seq[actual_start: actual_start + lb]
             if len(sub) != len(bait):
-                print(actual_start, 'wtf happened here')
+                print(actual_start, 'what happened here')
             if hamming_decide(bait, sub, m):
                 final_matches.add(actual_start)
         # alignment_time += time.time() - checkpoint
     # print('Lookup time:', lookup_time)
     # print('Discard time:', discard_time)
     # print('Alignment time:', alignment_time)
-    # print('Discarded because picked:', d_picked)
     # print('Discarded because checked:', d_checked)
     # print('Discarded because negative:', d_negative)
     # print('Discarded because concat:', d_concat)
     # print('Found alignments:', len(final_matches))
+    if len(final_matches) == 0:
+        raise Exception('how is this possible')
     return final_matches
 
 def hamming_distance(str1, str2):

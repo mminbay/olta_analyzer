@@ -72,6 +72,7 @@ def calculate_redundancy(
         f.write('Remaining uncovered indices: {}.\n'.format(cov.count(0)))
         f.write('Total coverage: {}.\n'.format(sum(cov)))
         f.write('Total redundant coverage: {}.\n'.format(sum(cov) - len(cov) + cov.count(0)))
+        f.write('Redundancy: {}.\n'.format((sum(cov)/(len(cov) - cov.count(0))) - 1))
         f.write('Mean coverage: {}.\n'.format(statistics.mean(cov)))
         f.write('Standard deviation: {}.\n'.format(statistics.stdev(cov)))
         f.write('Range: {}-{}.\n'.format(min(cov), max(cov)))

@@ -14,6 +14,11 @@ COLI3_OUR_DIR = os.path.join(OUT_DIR, 'coli3')
 MEGARES_OUT_DIR = os.path.join(OUT_DIR, 'megares')
 SYNTH_OUT_DIR = os.path.join(OUT_DIR, 'synthesized')
 
+POST_DIR = '/home/mminbay/honors_thesis/postprocess/'
+COLI3_POST_DIR = os.path.join(POST_DIR, 'coli3')
+MEGARES_POST_DIR = os.path.join(POST_DIR, 'megares')
+SYNTH_POST_DIR = os.path.join(POST_DIR, 'synthesized')
+
 def get_test_info(str):
     def __lookahead(field):
         return '(?=' + re.escape(field) + ')'
@@ -24,9 +29,34 @@ def get_test_info(str):
         result[field] = re.search(regex, str)[0]
     return result
 
+def run_analysis(
+    analysis,
+    baits_path,
+    seq_path,
+    output_dir,
+    d = 40,
+    rc = 0
+):
+    if analysis not in ['redundancy', 'workloads', 'fairness', 'verify']:
+        raise Exception('Invalid analysis')
+
+    file_name = os.path.basename(baits_path)
+    output_path = os.path.join(output_dir, file_name.replace('.fasta', '_' + analysis + '.fasta'))
+    command = [
+        'python', 
+        '/home/mminbay/honors_thesis/bait_research/postprocessing.py',
+        analysis,
+        baits_path,
+        seq_path,
+        str(d),
+        output_path,
+        str(rc)
+    ]
+    subprocess.run(command)
+
 def run_test(
-    test_path,
     method,
+    test_path,
     output_dir,
     d = 40,
     l = 120,
@@ -57,13 +87,32 @@ def synth_tests(method):
     synth_1m_paths = [os.path.join(SYNTH_SEQ_DIR, path) for path in synth_1m]
 
     args = [(
-        path,
         method,
+        path,
         SYNTH_OUT_DIR,
     ) for path in synth_1m_paths]
 
     with Pool(PROCESSES) as pool:
         result = pool.starmap(run_test, args)
+
+def synth_postprocess(analysis, method):
+    PROCESSES = 10
+    
+    synth_seqs = [file for file in os.listdir(SYNTH_SEQ_DIR) if '.fasta' in file]
+    synth_1m = [file for file in synth_seqs if int(get_test_info(file)['L']) <= 1000000]
+    synth_1m_basename = [os.path.basename(file) for file in synth_1m]
+    synth_results = [file.replace('.fasta', '_' + method + '.fasta') for file in synth_1m_basename]
+    synth_results_paths = [os.path.join(SYNTH_OUT_DIR, file) for file in synth_results]
+
+    args = [(
+        analysis,
+        baits_path,
+        os.path.join(SYNTH_SEQ_DIR, seq_path),
+        SYNTH_POST_DIR
+    ) for baits_path, seq_path in zip(synth_results_paths, synth_1m)]
+
+    with Pool(PROCESSES) as pool:
+        result = pool.starmap(run_analysis, args)
 
 def megares_tests(method):
     PROCESSES = 10
@@ -72,8 +121,8 @@ def megares_tests(method):
     megares_1m = [os.path.join(MEGARES_SEQ_DIR, path) for path in megares_1m]
 
     args = [(
-        path,
         method,
+        path,
         MEGARES_OUT_DIR,
     ) for path in megares_1m]
 
@@ -87,22 +136,17 @@ def coli3_tests(method):
     coli3_1m = [os.path.join(COLI3_SEQ_DIR, path) for path in coli3_1m]
 
     args = [(
-        path,
         method,
+        path,
         COLI3_OUR_DIR,
     ) for path in coli3_1m]
 
     with Pool(PROCESSES) as pool:
         result = pool.starmap(run_test, args)
+
     
 def main():
-    # run_test(
-    #     '/home/mminbay/honors_thesis/sequence_data/synthesized/100000L_100unique_120-240l_80pccov_40noise_no5.fasta',
-    #     'wfc_iter',
-    #     SYNTH_OUT_DIR
-    # )
-    coli3_tests('wfc_iter')
-    coli3_tests('syotti_wfc')
+    synth_postprocess('verify', 'wfc_iter')
     
 if __name__ == '__main__':
     main()

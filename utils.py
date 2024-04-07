@@ -1,15 +1,32 @@
 import os
 import multiprocessing as mp
 from pydivsufsort import divsufsort, sa_search
-from typing import List, Tuple
+from typing import List, Tuple, Set
 
-def update_ignores(
+def initialize_ignore_vector(
+    seqlens: List[int],
+    l: int,
+) -> List[bool]:
+    '''
+    Given a list of sequence lengths, create an ignore vector where the indices that would
+    cover concatenation spots are marked. Concatenation spots cannot be aligned to with baits, 
+    so they never need to be checked for alignments and can be ignored.
+    '''
+    ignore = [False] * sum(seqlens)
+    seqlen_sum = 0
+    for seqlen in seqlens:
+        seqlen_sum += seqlen
+        for i in range(seqlen_sum - l + 1, seqlen_sum):
+            ignore[i] = True
+    return ignore
+
+def update_ignore_vector(
     cov: List[bool],
     seqlens: List[int],
     ignore: List[bool],
     region: Tuple[int, int],
     l: int
-):
+) -> None:
     '''
     Given a coverage vector, an ignore vector, and a covered region, find the indices that
     no longer need to be checked for alignments and update the ignore vector accordingly. An
@@ -42,14 +59,42 @@ def update_ignores(
         if streak >= l:
             ignore[i - l + 1] = True
 
+def brute_force_alignment(
+    seq: str,
+    bait: str,
+    d: int,
+    ignore: List[bool],
+    **kwargs
+) -> List[int]:
+    '''
+    Compute coverages in the brute-force way.
+
+    Arguments:
+        seq (str): Sequence to search for the baits in. 
+        bait (str): Bait to search for.
+        d (int): Allowed Hamming distance for each match.
+        ignore (list[boolean]): Indices that have True entries in this list will not be
+            aligned. This should be used to mark indices that would cover concatenation spots or 
+            already covered s.t. another alignment would not increase the coverage.
+        **kwargs is just provided so the function has the same signature as seed_and_extend.
+    '''
+    final_matches = []
+    l = len(bait)
+    for i in range(len(seq)):
+        if ignore[i]:
+            continue
+        if hamming_decide(bait, seq[i: i + l], d):
+            final_matches.append(i)
+    return final_matches
+
 def seed_and_extend(
     seq: str,
     bait: str,
     d: int,
     ignore: List[bool],
     sa = None,
-    seed_len: int = 10,
-):
+    seed_length: int = 10,
+) -> List[int]:
     '''
     Applies the seed-and-extend heuristic to search for imperfect matches of the bait
     in the sequence. Returns a list of indices of the matches.
@@ -58,82 +103,30 @@ def seed_and_extend(
 
     Arguments:
         seq (str): Sequence to search for the baits in. 
-        bait (str): Bait to search for.
+        bait (str): Bait to align.
         d (int): Allowed Hamming distance for each match.
-        sa (suffix array): Suffix array of the string. If not provided, will be constructed.
-        seed_len (int): Seed length to use for the heuristic. Every seed-length substring of the 
         ignore (list[boolean]): Indices that have True entries in this list will not be
             aligned. This should be used to mark indices that would cover concatenation spots or 
             already covered s.t. another alignment would not increase the coverage.
-            bait will be used as seeds.
-        
+        sa (suffix array): Suffix array of the string. If not provided, will be constructed.
+        seed_length (int): Seed length to use for the heuristic.
     '''
     if sa is None:
         sa = divsufsort(seq)
-
-    if ignore is None:
-        ignore = [False] * len(seq)
-
-    # the indices of the ignore list that are modified within the scope of the function.
-    # these indices should be reverted at the end of the process
+        
     modified_indices = []
 
     lb = len(bait)
-    if seed_len > lb:
+    if seed_length > lb:
         raise Exception('Specified seed length is larger than the actual bait.')
     
-    # checked_indices = set()
-
-    # lookup_time = 0
-    # discard_time = 0
-    # alignment_time = 0
-    # d_checked = 0
-    # d_concat = 0
-    # d_negative = 0
-    
     final_matches = []
-    # for i in tqdm(range(lb - seed_len + 1), desc = 'Considering seeds', unit = 'seed'):
-    for i in range(lb - seed_len + 1):
-        # checkpoint = time.time()
-        seed = bait[i: i + seed_len]
+    for i in range(lb - seed_length + 1):
+        seed = bait[i: i + seed_length]
         seed_matches = sa_search(seq, sa, seed)
-        # lookup_time += time.time() - checkpoint
         if seed_matches[1] is None:
             continue
         seed_matches = set(sa[seed_matches[1]: seed_matches[0] + seed_matches[1]])
-        # checkpoint = time.time()
-        # seq_start = 0
-        # seq_end = 0
-        # eliminate alignments that cover concatenation points
-        # for seqlen in seqlens:
-        #     discard_matches = set()
-        #     seq_start = seq_end
-        #     seq_end += seqlen
-        #     for match in seed_matches:
-        #         # find actual start of this alignment and check if it covers a concatenation
-        #         actual_start = match - i
-        #         if ignore[actual_start]:
-        #             continue
-        #         if actual_start in checked_indices:
-        #             discard_matches.add(match)
-        #             print('discarded bc already checked')
-        #             d_checked += 1
-        #         elif actual_start < 0:
-        #             continue
-        #         elif actual_start < 0:
-        #             discard_matches.add(match)
-        #             print('discarded bc negative')
-        #             d_negative += 1
-        #         elif actual_start < seq_end and actual_start > seq_end - lb:
-        #             modified_indices.append(actual_start)
-        #             ignore[actual_start] = True
-        #         elif actual_start < seq_end and actual_start > seq_end - lb:
-        #             discard_matches.add(match)
-        #             print('discarded bc concat spot')
-        #             d_concat += 1
-        #     seed_matches = seed_matches.difference(discard_matches) # VERY INEFFICIENT - change
-        # discard_time += time.time() - checkpoint
-        # checkpoint = time.time()
         for match in seed_matches:
             actual_start = match - i
             if actual_start < 0:
@@ -142,30 +135,16 @@ def seed_and_extend(
                 continue
             ignore[actual_start] = True # to make sure we don't check this index again
             modified_indices.append(actual_start) # to make sure we revert it to False at the end
-            # checked_indices.add(actual_start)
             sub = seq[actual_start: actual_start + lb]
             if len(sub) != len(bait):
                 print(actual_start, 'what happened here')
             if hamming_decide(bait, sub, d):
                 final_matches.append(actual_start)
-        # alignment_time += time.time() - checkpoint
-    # print('Lookup time:', lookup_time)
-    # print('Discard time:', discard_time)
-    # print('Alignment time:', alignment_time)
-    # print('Discarded because checked:', d_checked)
-    # print('Discarded because negative:', d_negative)
-    # print('Discarded because concat:', d_concat)
-    # print('Found alignments:', len(final_matches))
-    for i in modified_indices:
+    for i in modified_indices: # revert the indices ignored for this iteration
         ignore[i] = False
-    # if len(final_matches) == 0:
-    #     raise Exception('how is this possible')
-    for m in final_matches:
-        if ignore[m]:
-            raise Exception("why return ignor")
     return final_matches
 
-def hamming_distance(str1, str2):
+def hamming_distance(str1, str2) -> int:
     if len(str1) != len(str2):
         raise ValueError("Input strings must have the same length")
 
@@ -179,7 +158,7 @@ def hamming_distance(str1, str2):
             distance += 1
     return distance
 
-def hamming_decide(str1, str2, m):
+def hamming_decide(str1, str2, d) -> bool:
     '''
     '''
     distance = 0
@@ -188,17 +167,17 @@ def hamming_decide(str1, str2, m):
             distance += 1 
         elif str1[i] != str2[i]:
             distance += 1
-        if distance > m:
+        if distance > d:
             return False
     return True
 
-def calculate_seqlens(seqs: List[str]):
+def calculate_seqlens(seqs: List[str]) -> List[int]:
     return [len(seq) for seq in seqs]
 
-def calculate_coverage(subs, l):
+def calculate_coverage(subs, l) -> List[Tuple[int, int]]:
     '''
-        Given a list of substring starting indices and substring length, return an actual list of starting and ending indices for the coverage of these substrings.
-        Example: suppose we have subs = [5, 10, 15, 45], l = 10. These cover from [5, 25] and [45, 55]
+    Given a list of substring starting indices and substring length, return an actual list of starting and ending indices for the coverage of these substrings.
+    Example: suppose we have subs = [5, 10, 15, 45], l = 10. These cover from [5, 25] and [45, 55]
     '''
     if len(subs) == 0:
         return []
@@ -216,7 +195,7 @@ def calculate_coverage(subs, l):
     results.append((curr_start, curr_end)) # end last interval
     return results
 
-def reverse_complement(sequence):
+def reverse_complement(sequence) -> str:
     complement_dict = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C', 'N': 'N'}
 
     # Create a list of the complement of each nucleotide in the reversed sequence

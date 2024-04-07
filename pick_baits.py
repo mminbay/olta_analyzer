@@ -24,6 +24,7 @@ def pick_baits_syotti(
     log: str = None,
 ) -> Tuple[List[int], List[str]]:
     '''
+    NEEDS UPDATE
     Algorithm to pick baits imitating the Syotti method. Unlike the original
     Syotti implementation, reverse complements are optional.
 
@@ -47,7 +48,7 @@ def pick_baits_syotti(
         f.write('l (bait length) = {}\n'.format(l))
         f.write('m (mismatch allowance) = {}\n'.format(d))
         f.write('seed_length = {}\n'.format(seed_length))
-        f.write('rc (reverse complements) = {}\n'.format(seed_length))
+        f.write('rc (reverse complements) = {}\n'.format(rc))
         f.write('--------\n')
     else:
         verbose = False
@@ -90,7 +91,7 @@ def pick_baits_syotti(
         if verbose:
             f.write('Aligning bait at {}.\n'.format(bait_start))
         bait = s[bait_start: bait_start + l]
-        matches = list(seed_and_extend(s, bait, d, sa, seed_length, seqlens))
+        matches = seed_and_extend(s, bait, d, ignore, sa = sa, seed_length = seed_length),
         coverages = calculate_coverage(matches, l)
         if verbose:
             f.write('Bait covers between:\n {}\n'.format(coverages))
@@ -102,7 +103,7 @@ def pick_baits_syotti(
         # reverse complement
         if rc:
             bait = reverse_complement(bait)
-            matches = list(seed_and_extend(s, bait, d, sa, seed_length, seqlens))
+            matches = seed_and_extend(s, bait, d, ignore, sa = sa, seed_length = seed_length)
             coverages = calculate_coverage(matches, l)
             if verbose and len(coverages) > 0:
                 f.write('Reverse complement covers between:\n {}\n'.format(coverages))
@@ -127,6 +128,7 @@ def pick_baits_syotti_smart(
         log: str = None,
 ) -> Tuple[List[int], List[str]]:
     '''
+    NEEDS UPDATE
     Algorithm to pick baits with a modified syotti method. Instead of committing to
     the first pick that covers an uncovered index, this one will consider all baits
     that cover that index and pick the one with maximum coverage.
@@ -192,11 +194,11 @@ def pick_baits_syotti_smart(
         if range_start < current_seqstart:
             range_start = current_seqstart
             if verbose:
-                f.write('Baits after {} would cover a concatenation spot at {}.\n'.format(range_start, current_seqstart))
+                f.write('Baits before {} would cover a concatenation spot at {}.\n'.format(range_start, current_seqstart))
         if range_end > current_seqend - l:
             range_end = current_seqend - l
             if verbose:
-                f.write('Baits before {} would cover a concatenation spot at {}.\n'.format(range_end, current_seqend))
+                f.write('Baits after {} would cover a concatenation spot at {}.\n'.format(range_end, current_seqend))
         if verbose:
             f.write('Considering baits from {} to {}.\n'.format(range_start, range_end))
         max_bait = None
@@ -205,9 +207,9 @@ def pick_baits_syotti_smart(
         max_covered = None
         for j in range(range_start, range_end + 1):
             bait = s[j: j + l]
-            matches = list(seed_and_extend(s, bait, d, sa, seed_length, seqlens))
+            matches = seed_and_extend(s, bait, d, ignore, sa = sa, seed_length = seed_length)
             if rc:
-                matches.extend(list(seed_and_extend(s, reverse_complement(bait), d, sa, seed_length, seqlens)))
+                matches.extend(seed_and_extend(s, reverse_complement(bait), d, sa = sa, seed_length = seed_length))
             coverages = calculate_coverage(matches, l)
             curr_cov = 0
             for c in coverages:
@@ -240,6 +242,7 @@ def pick_baits_syotti_wfc(
         log: str = None,
 ) -> Tuple[List[int], List[str]]:
     '''
+    NEEDS UPDATE
     Algorithm to pick baits with a modified syotti method, first improvement. In 
     addition to considering all baits that cover a position, this one will use 
     WFC-CSP to compute a Hamming center for the coverage areas and realign that 
@@ -279,8 +282,9 @@ def pick_baits_syotti_wfc(
     
     length = len(s)
     cov = [False] * length
+    ignore = initialize_ignore_vector(seqlens, l)
     if verbose:
-        f.write('Initialized bit array with length {}.\n'.format(length))
+        f.write('Initialized bit array and ignore array with length {}.\n'.format(length))
 
     final_baits = []
     final_indices = []
@@ -305,22 +309,23 @@ def pick_baits_syotti_wfc(
         if range_start < current_seqstart:
             range_start = current_seqstart
             if verbose:
-                f.write('Baits after {} would cover a concatenation spot at {}.\n'.format(range_start, current_seqstart))
+                f.write('Baits before {} would cover a concatenation spot at {}.\n'.format(range_start, current_seqstart))
         if range_end > current_seqend - l:
             range_end = current_seqend - l
             if verbose:
-                f.write('Baits before {} would cover a concatenation spot at {}.\n'.format(range_end, current_seqend))
+                f.write('Baits after {} would cover a concatenation spot at {}.\n'.format(range_end, current_seqend))
         if verbose:
             f.write('Considering baits from {} to {}.\n'.format(range_start, range_end))
         max_bait = None
         max_cov = 0
-        max_index = -1
+        max_index = 0
         max_covered = None
         for j in range(range_start, range_end + 1):
             bait = s[j: j + l]
-            matches = list(seed_and_extend(s, bait, d, sa, seed_length, seqlens))
-            if rc:
-                matches.extend(list(seed_and_extend(s, reverse_complement(bait), d, sa, seed_length, seqlens)))
+            matches = seed_and_extend(s, bait, d, ignore, sa = sa, seed_length = seed_length)
+            # IMPLEMENT REVERSE COMPLEMENT
+            # if rc:
+            #     matches.extend(seed_and_extend(s, reverse_complement(bait), d, ignore, sa = sa, seed_length = seed_length))
             # grab the exact strings from the parts 
             uncovered_match_strings = [s[match: match + l] for match in matches if cov[match: match + l].count(False) > 0]
             # compute center
@@ -328,9 +333,10 @@ def pick_baits_syotti_wfc(
             # if center is valid (max_dist <= d), compute its coverage. otherwise, use the initial "exact substring" bait
             if max_dist <= d:
                 bait = center
-                matches = list(seed_and_extend(s, bait, d, sa, seed_length, seqlens))
-                if rc:
-                    matches.extend(list(seed_and_extend(s, reverse_complement(bait), d, sa, seed_length, seqlens)))
+                matches = seed_and_extend(s, bait, d, ignore, sa = sa, seed_length = seed_length)
+                # IMPLEMENT: REVERSE COMPLEMENT
+                # if rc:
+                #     matches.extend(seed_and_extend(s, reverse_complement(bait), d, ignore, sa = sa, seed_length = seed_length))
             coverages = calculate_coverage(matches, l)
             curr_cov = 0
             for c in coverages:
@@ -352,15 +358,15 @@ def pick_baits_syotti_wfc(
         f.write('Remaining uncovered indices: {}.\n'.format(cov.count(False)))
         f.write('Picked {} baits in {} seconds.\n'.format(len(final_baits), end - start))
         f.close()
-    return final_baits
+    return final_indices, final_baits
 
 def pick_baits_wfc_iter(
-        s: Union[str, List[str]], 
-        l: int,
-        d: int,
-        seed_length: int = 10,
-        rc: bool = False,
-        log: str = None,
+    s: Union[str, List[str]], 
+    l: int,
+    d: int,
+    seed_length: int = 10,
+    rc: bool = False,
+    log: str = None,
 ) -> Tuple[List[int], List[str]]:
     '''
     Algorithm to pick baits with a modified syotti method, second improvement. WFC-CSP will be
@@ -401,18 +407,12 @@ def pick_baits_wfc_iter(
     
     length = len(s)
     cov = [False] * length
-    ignore = [False] * length
+    ignore = initialize_ignore_vector(seqlens, l)
     if verbose:
         f.write('Initialized bit array and ignore array with length {}.\n'.format(length))
-
-    # update ignore so that indices that appear before concatenation spots cannot be aligned
-    seqlen_sum = 0
-    for seqlen in seqlens:
-        seqlen_sum += seqlen
-        for i in range(seqlen_sum - l + 1, seqlen_sum):
-            ignore[i] = True
     
     final_baits = []
+    final_indices = []
 
     current_seqstart = 0
     current_seqend = 0
@@ -427,33 +427,35 @@ def pick_baits_wfc_iter(
             seqlens_ctr += 1
             current_seqend += seqlens[seqlens_ctr]
         if verbose:
-            f.write('Index {} is not yet covered.\n'.format(i))
+            f.write('---\nIndex {} is not yet covered.\n'.format(i))
         # if this bait covers a concatenation spot, pick the last bait that doesn't
         range_start = i - l + 1
         range_end = i
         if range_start < current_seqstart:
             range_start = current_seqstart
             if verbose:
-                f.write('Baits after {} would cover a concatenation spot at {}.\n'.format(range_start, current_seqstart))
+                f.write('Baits before {} would cover a concatenation spot at {}.\n'.format(range_start, current_seqstart))
         if range_end > current_seqend - l:
             range_end = current_seqend - l
             if verbose:
-                f.write('Baits before {} would cover a concatenation spot at {}.\n'.format(range_end, current_seqend))
+                f.write('Baits after {} would cover a concatenation spot at {}.\n'.format(range_end, current_seqend))
         if verbose:
             f.write('Considering baits from {} to {}.\n'.format(range_start, range_end))
         max_bait = None
         max_cov = 0
+        max_index = 0
         max_covered = None
         for j in range(range_start, range_end + 1):
             if verbose:
-                f.write('Considering exact substring starting at {} as a bait.\n'.format(j))
+                f.write('-\nConsidering exact substring starting at {} as a bait.\n'.format(j))
             bait = s[j: j + l]
-            matches = list(seed_and_extend(s, bait, d, ignore, sa = sa))
+            matches = seed_and_extend(s, bait, d, ignore, sa = sa, seed_length = seed_length)
             # indices that are covered by current bait. these are temporarily ignored so later iterations
             # do not realign them
             curr_ignore = []
-            if rc:
-                matches.extend(list(seed_and_extend(s, reverse_complement(bait), d, ignore, sa = sa)))
+            # IMPLEMENT: reverse complements
+            # if rc:
+            #     matches.extend(seed_and_extend(s, reverse_complement(bait), d, ignore, sa = sa, seed_length = seed_length))
             for match in matches:
                 curr_ignore.append(match)
                 ignore[match] = True
@@ -487,15 +489,16 @@ def pick_baits_wfc_iter(
                     break
                 # otherwise, set this center as the new bait and compute its coverage
                 bait = center
-                new_matches = list(seed_and_extend(s, bait, d, ignore, sa = sa))
-                if rc:
-                    new_matches.extend(list(seed_and_extend(
-                        s, 
-                        reverse_complement(bait), 
-                        d,
-                        ignore,
-                        sa = sa
-                    )))
+                new_matches = seed_and_extend(s, bait, d, ignore, sa = sa, seed_length = seed_length)
+                # IMPLEMENT: reverse complements
+                # if rc:
+                #     new_matches.extend(seed_and_extend(
+                #         s, 
+                #         reverse_complement(bait), 
+                #         d,
+                #         ignore,
+                #         sa = sa,
+                #     ))
                 for match in new_matches:
                     curr_ignore.append(match)
                     ignore[match] = True
@@ -517,30 +520,40 @@ def pick_baits_wfc_iter(
             if curr_max_cov > max_cov:
                 max_bait = bait
                 max_cov = curr_max_cov
+                max_index = j
                 max_covered = coverages
+                if verbose:
+                    f.write('Index {}, iteration {} is the new best bait with coverage {}\n'.format(
+                        j, iter, max_cov
+                    ))
             # revert the indices that were ignored for this iteration
             for index in curr_ignore:
                 ignore[index] = False
         final_baits.append(max_bait)
+        final_indices.append(max_index)
         for c in max_covered:
-            update_ignores(cov, seqlens, ignore, c, l)
+            update_ignore_vector(cov, seqlens, ignore, c, l)
             for j in range(c[0], c[1]):
                 cov[j] = True
+        if verbose:
+            f.write('---\nPicked bait covers: {}\n'.format(max_covered))
+        if not cov[i]:
+            raise Exception('Index {} was somehow not covered\n'.format(i))
     end = time.time()
     if verbose:
         f.write('Remaining uncovered indices: {}.\n'.format(cov.count(False)))
         f.write('Picked {} baits in {} seconds.\n'.format(len(final_baits), end - start))
         f.close()
-    return final_baits
+    return final_indices, final_baits
 
 def pick_baits_vsearch(
-        s: Union[str, List[str]], 
-        l: int, 
-        k: int, 
-        dir: str, 
-        output: str, 
-        log: str = None
-    ) -> Set[int]:
+    s: Union[str, List[str]], 
+    l: int, 
+    k: int, 
+    dir: str, 
+    output: str, 
+    log: str = None
+) -> Set[int]:
     '''
     Algorithm to pick baits. Given a sequence (list) and its VSEARCH clustering
     output of its substrings, outputs a set of baits that cover the entire sequence(s).
@@ -720,7 +733,7 @@ if __name__ == '__main__':
         output = sys.argv[5]
         rc = int(sys.argv[6]) > 0
         _, sequences = sequences_from_fasta(spath)
-        baits = pick_baits_syotti_wfc(
+        ids, baits = pick_baits_syotti_wfc(
             sequences,
             l,
             d,
@@ -728,7 +741,7 @@ if __name__ == '__main__':
             rc = rc,
             log = output[:output.rfind('.')] + '.log'
         )
-        sequences_to_fasta(baits, output)
+        sequences_to_fasta(baits, output, ids = ids)
     elif method == 'wfc_iter':
         spath = sys.argv[2]
         l = int(sys.argv[3])
@@ -736,7 +749,7 @@ if __name__ == '__main__':
         output = sys.argv[5]
         rc = int(sys.argv[6]) > 0
         _, sequences = sequences_from_fasta(spath)
-        baits = pick_baits_wfc_iter (
+        ids, baits = pick_baits_wfc_iter(
             sequences,
             l,
             d,
@@ -744,7 +757,9 @@ if __name__ == '__main__':
             rc = rc,
             log = output[:output.rfind('.')] + '.log'
         )
-        sequences_to_fasta(baits, output)
+        print(ids[:5])
+        print(baits[:5])
+        sequences_to_fasta(baits, output, ids = ids)
     else:
         raise Exception('what')
         

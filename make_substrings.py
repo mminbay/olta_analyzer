@@ -16,15 +16,15 @@ def substrings_from_sequences(
     k: int = 1
 ):
     '''
-        From a list of sequences, return a list of every l-length sequence 
-        with k-apart starting indices. The last l-length substring of every 
-        sequence is always included, so the entire sequence is covered.
+    From a list of sequences, return a list of every l-length sequence 
+    with k-apart starting indices. The last l-length substring of every 
+    sequence is always included, so the entire sequence is covered.
 
-        Arguments:
-            sequences (list[str]): Sequences to generate substrings from.
-            l (int): Length of substrings to generate.
-            k (int): Distance between starting indices of substrings to 
-                generate.
+    Arguments:
+        sequences (list[str]): Sequences to generate substrings from.
+        l (int): Length of substrings to generate.
+        k (int): Distance between starting indices of substrings to 
+            generate.
     '''
     substrings = []
     indices = []

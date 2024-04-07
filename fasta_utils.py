@@ -9,7 +9,7 @@ from utils import hamming_distance
 def synthesize_sequence(
     s_length: int,
     n_repeats: int,
-    repeat_length: Tuple[int, int],
+    repeat_length: Union[int, Tuple[int, int]],
     repeat_coverage: float,
     repeat_noise: int,
     log: str = None
@@ -21,8 +21,8 @@ def synthesize_sequence(
         s_length (int): Length of the sequence to be generated.
         n_repeats (int): Number of unique repeats. These repeats will be randomly
             scattered around the generated sequence.
-        repeat_length (tuple[int, int]): Min and max values for the length of the repeats. The
-            repeats will be randomized within this range.
+        repeat_length (int or tuple[int, int]): Value, or min and max values for the length of the repeats.
+        If a tuple if provided, the repeats will be randomized within this range.
         repeat_coverage ([0, 1]): The proportion of the finals sequence that should be populated
             with repeats. Note that this is a lower bound: The randomized regions may have repeats
             by chance.
@@ -34,31 +34,59 @@ def synthesize_sequence(
     verbose = False
     if log is not None:
         verbose = True
-        logging.basicConfig(filename = log, level = logging.DEBUG)
+        f = open(log, 'w')
+        f.write('Generating baits with following arguments:\n')
+        f.write('L = {}\n'.format(s_length))
+        f.write('RN (repeat number) = {}\n'.format(n_repeats))
+        f.write('RL (repeat length) = {}\n'.format(repeat_length))
+        f.write('RC (repeat coverage) = {}\n'.format(repeat_coverage))
+        f.write('RE (repeat error) = {}\n'.format(repeat_noise))
         
     BASES = ['A', 'G', 'T', 'C']
     vec = [None] * s_length
     total_populated = 0
-    repeats = []
-    for i in range(n_repeats):
-        l = random.randint(repeat_length[0], repeat_length[1])
-        repeats.append(''.join(random.choices(BASES, k = l)))
+    repeats_pools = {}
     if verbose:
-        logging.info('Generated the following base repeats:')
-        for i, repeat in enumerate(repeats):
-            logging.info('{}: {}'.format(i, repeat))
+        repeats_locations = {}
+    for i in range(n_repeats):
+        l = repeat_length
+        if type(repeat_length) is tuple:
+            l = random.randint(repeat_length[0], repeat_length[1])
+        repeat = ''.join(random.choices(BASES, k = l))
+        while repeat in repeats_pools.keys():
+            repeat = ''.join(random.choices(BASES, k = l))
+        repeats_pools[repeat] = set(range(s_length - l + 1))
+        if verbose:
+            repeats_locations[repeat] = []
     repeat_coverage = repeat_coverage * s_length
+    repeats = list(repeats_pools.keys())
+    repeats_ctr = 0
     while total_populated < repeat_coverage:
-        i = random.randrange(0, s_length)
-        repeat_i = random.randrange(len(repeats))
-        repeat = repeats[repeat_i]
-        if i + len(repeat) >= s_length:
+        repeat = repeats[repeats_ctr]
+        i = -1
+        if repeat_coverage == s_length:
+            i = total_populated # if entire sequence is repeats, fill the next index
+        elif len(repeats_pools[repeat]) == 0:
+            if verbose:
+                f.write('WARNING: {} has no more indices it can be planted in.\n'.format(repeat))
+            repeats.remove(repeat)
+            n_repeats -= 1
+            repeats_ctr = repeats_ctr % n_repeats
             continue
+        else:
+            i = random.choice(list(repeats_pools[repeat]))
+        if i + len(repeat) > s_length:
+            if repeat_coverage == s_length:
+                vec.extend([None] * (i + len(repeat) - s_length)) # extend vector to accomodate this plant
+                if verbose:
+                    f.write('Extended sequence to {} base pairs to add final repeat.'.format(len(vec)))
+            else:
+                continue
         for j in range(len(repeat)):
             if vec[i + j] is not None:
-                continue
+                raise Exception('this shouldnt happen')
         if verbose:
-            logging.info('Populating index {} with a modification on repeat number {}.'.format(i, repeat_i))
+            repeats_locations[repeat].append(i)
         n_modifs = random.randint(0, repeat_noise)
         modif_locs = random.choices(range(len(repeat)), k = n_modifs)
         for j in range(len(repeat)):
@@ -66,12 +94,22 @@ def synthesize_sequence(
                 vec[i + j] = random.choice([x for x in BASES if x != repeat[j]])
             else:
                 vec[i + j] = repeat[j]
+        for other in repeats:
+            for j in range(i - len(other) + 1, i + len(repeat)):
+                if j in repeats_pools[other]:
+                    repeats_pools[other].discard(j)
+        repeats_ctr = (repeats_ctr + 1) % n_repeats
         total_populated = len(vec) - vec.count(None)
-        generated_repeat = ''.join(vec[i:i + len(repeat)])
-        if verbose:
-            logging.info('Randomized {} indices:\n{}'.format(n_modifs, modif_locs))
-            logging.info('Populated index with the following:\n{}'.format(generated_repeat))
-            logging.info('Current total repeat length: {}'.format(total_populated))
+    if verbose:
+        f.write('Total covered base pairs: {}\n'.format(total_populated))
+        for k, v in repeats_locations.items():
+            if len(v) == 0 or len(v) == 1:
+                print('WARNING: Some repeats were planted < 2 times')
+                f.write('WARNING: Some repeats were planted < 2 times\n')
+                break
+        f.write('Repeats and the locations they were planted in:\n')
+        for k, v in repeats_locations.items():
+            f.write(str(k) +  ': ' + str(v) + '\n')
     for i in range(s_length):
         if vec[i] is None:
             vec[i] = random.choice(BASES)
@@ -131,8 +169,6 @@ def sequences_from_fasta(
             seq = seq[:min_length]
         sequences = [seq]
         length = len(sequences[0])
-    print("Number of sequences read: ", read)
-    print("Total length: ", length)
     return ids, sequences
 
 def sequences_to_fasta(

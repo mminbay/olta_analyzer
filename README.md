@@ -1,22 +1,44 @@
 # bait_research
-Work I am doing for my CS honors thesis at colgate.
+Analyzer used for OLTA (https://github.com/FuelTheBurn/generative-bait-clustering)
 
 # Usage
-`pick_baits.py` contains all of the methods you will need for generating baits. The file must be run as follows:
+## Postprocessing analyses
+`postprocessing.py` has the functions for redundancy and workload analyses. You can run the analyses as follows:
 
 ```
-$ python pick_baits.py <syotti|syotti_s> <spath> <l> <m> <output> <rc>
+$ python postprocessing.py [redundancy, workloads] <bait_path> <seq_path> <mismatch> <output> <rcomp> <exact> <n_cores>
 ```
+Arguments:
+* `bait_path`: The path to the baits that are to be analyzed. This should be a `.fasta` or `.fna` file where each entry is a bait.
+* `seq_path`: The path to the sequence(s) that the baits will be analyzed on. This should be a `.fasta` or `.fna` file where each entry is an input sequence.
+*  `mismatch`: Number of mismatches that are tolerated for bait hybridizations (the $\theta$ parameter).
+*  `output`: The path where the analysis result will be outputted. Redundancy analyses require a `.txt` extension file, as the output will be a vector where each entry indicates how many baits in the solution set cover that respective position in the input sequence(s). Workload analyses require a `.csv` extension, as the output will be a table indicating the expected workload of each bait. See the original paper for the definitions of these terms.
+*  `rcomp`: Currently non-functional. An integer greater than 0 will consider reverse complement alignments of the baits.
+*  `exact`: Using an integer greater than 0 will use the brute-force algorithm for calculating bait alignments. Using 0 will use the seed-and-extend alignment. We recommend using the brute-force algorithm when analyzing baits produced by OLTA.
+*  `n_cores`: Number of processes to be used if using the brute-force alignment.
 
-* `syotti`:  Mock implementation of the Syotti heuristic \[1\]. Note that this is a Python implementation with no parallelization - it runs much slower than the original Syotti heuristic and was only implemented for testing and comparison purposes.
-* `syotti_s`:  Our algorithm. This expands on the single-pass Syotti heuristic by computing the coverage for every l-length substring that includes the current uncovered index, and picking the substring with the greatest coverage as a bait. This consistently results in fewer baits with a running time no worse than that of **MOCK SYOTTI** multiplied by the bait length. It is in future work to implement this more efficiently to have a running time comparable to the original Syotti implementation.
-* `spath`: Path to a `.fasta` file containing the sequences you wish to work with.
-* `l`: Positive integer indicating the length of baits to be generated.
-* `m`: Non-negative integer indicating the maximum Hamming distance that is permitted for a bait to be considered as "covering" a region.
-* `output`: Output path.
-* `rc`: Non-negative integer indicating whether reverse complements should be used for calculating bait coverages. Pass 0 to ignore reverse complements, or any number greater to include them.
+### Example
 
+## Sequence synthesizing
+`wrappers.py` wraps the function for synthesizing sequences with controlled repetitions. You can use this functionality as follows:
+```
+$ python wrappers.py synthesize <sl> <rn> <rl> <rc> <modif> <output>
+```
+Arguments:
+* `sl`: Length of the sequence to be synthesized in nucleotides.
+* `rn`: Number of unique seed repeats to be planted in the sequence.
+* `rl`: Minimum and maximum possible lengths (in nucleotides) for the unique seed repeats, separated by a hyphen (-).
+* `rc`: Fraction of the sequence to be covered with imperfect copies of the unique seed repeats.
+* `modif`: Number of modifications to be made on a seed repeat before planting it into the sequence.
+* `output`: The path where the resulting sequence will be outputted.
 
-# Citations
-\[1\] J. N. Alanko, I. B. Slizovskiy, D. Lokshtanov, T. Gagie, N. R. Noyes, and C. Boucher, “Syotti: scalable bait design for DNA enrichment,” Bioinformatics, vol. 38, no. Supplement_1, pp. i177–i184, Jun. 2022, doi: 10.1093/bioinformatics/btac226.
+### Example
+```
+python wrappers.py synthesize 50000 50 120-240 0.5 40 test.fasta
+```
+Running this command will generate a sequence with 50000 nucleotides. Half of this sequence will be covered by imperfect copies of 50 seed repeats, each of which are 120-240 nucleotides in length. The imperfect copies will have at most 40 Hamming distance to their respective seeds.
 
+### Notes
+As the repeat coverage grows beyond 0.5, it becomes increasingly likely that the algorithm will result in a dead end, i.e. there will be no more contiguous empty regions to place repetitions despite not having reached the desired fraction. Multiple attempts might be necessary to synthesize such sequences.
+
+Using a repeat coverage of 1.0 will just concatenate the imperfect copies instead of planting them into an empty sequence.s

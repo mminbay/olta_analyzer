@@ -50,7 +50,7 @@ def synthesize_sequence(
         repeats_locations = {}
     for i in range(n_repeats):
         l = repeat_length
-        if type(repeat_length) is tuple:
+        if type(repeat_length) is list:
             l = random.randint(repeat_length[0], repeat_length[1])
         repeat = ''.join(random.choices(BASES, k = l))
         while repeat in repeats_pools.keys():
@@ -114,6 +114,77 @@ def synthesize_sequence(
         if vec[i] is None:
             vec[i] = random.choice(BASES)
     return ''.join(vec)
+
+def read_sequences(
+    file: str,
+    n: int = None,
+    min_length: int = None,
+    indices: List[int] = None,
+    start: int = 0,
+    slice_seqs: bool = False,
+) -> Tuple[List[str], List[str]]:
+    if os.path.splitext(file)[1] == '.fasta' or os.path.splitext(file)[1] == '.fna':
+        return sequences_from_fasta(file, n, min_length, indices, start, slice_seqs)
+    elif os.path.splitext(file)[1] == '.txt':
+        return sequences_from_txt(file, n, min_length, indices, start, slice_seqs)
+
+def sequences_from_txt(
+    file: str,
+    n: int = None,
+    min_length: int = None,
+    indices: List[int] = None,
+    start: int = 0,
+    slice_seqs: bool = False,
+) -> Tuple[List[str], List[str]]:
+    '''
+    Read a fasta file and return a list of sequences based on the provided arguments.
+
+    Arguments:
+        file (str): Path to fasta file
+        n (int): Number of sequences to be read. If not None, reading will stop after
+            this many sequences have been read.
+        min_length (int): Minimum total length of sequences to be read. If not None, 
+            reading will stop after total length exceeds this number.
+        indices (list(int)): Indices of sequences to be read. Other sequences will be skipped.
+        start (int): Index of first sequence to be read. Sequences that appear before this 
+            will be skipped.
+        slice_seqs (bool): If True, will return a list with a single sequences by concatenating
+            all sequences that were read. Will also truncate the sequence to exactly match the
+            min_length argument, if it was provided.
+    '''
+    ids = []
+    sequences = []
+    read = 0
+    length = 0
+    with open(file, 'r') as file:
+        lines = file.readlines()
+    for i in range(len(lines)):
+        line = lines[i]
+        line = line.strip()
+        if i // 2 < start:
+            continue
+        if indices is not None:
+            if i // 2 not in indices:
+                continue
+        if i % 2 == 0:
+            ids.append(line)
+        else:
+            sequences.append(line.upper())
+            length += len(line)
+            read += 1
+            if n is not None:
+                if read >= n:
+                    break
+            if min_length is not None:
+                if length >= min_length:
+                    break
+    if slice_seqs:
+        seq = ''.join(sequences)
+        if min_length is not None:
+            seq = seq[:min_length]
+        sequences = [seq]
+        ids = [ids[0] + '_sliced']
+    return ids, sequences
         
 def sequences_from_fasta(
     file: str,
@@ -168,7 +239,7 @@ def sequences_from_fasta(
         if min_length is not None:
             seq = seq[:min_length]
         sequences = [seq]
-        length = len(sequences[0])
+        ids = [ids[0] + '_sliced']
     return ids, sequences
 
 def sequences_to_fasta(
@@ -185,6 +256,9 @@ def sequences_to_fasta(
         ids (list[str]): IDs of the sequences in the outputted fasta file. If None,
             IDs will be sequential.
     '''
+    dir = os.path.dirname(output_file)
+    if dir != '' and not os.path.exists(dir):
+        os.makedirs(dir)
     if type(sequences) == str:
         sequences = [sequences]
     with open(output_file, 'w') as fasta_file:

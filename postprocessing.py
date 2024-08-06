@@ -1,6 +1,6 @@
 import csv
 import matplotlib.pyplot as plt
-from fasta_utils import sequences_from_fasta
+from fasta_utils import read_sequences
 import numpy as np
 import os
 from pydivsufsort import divsufsort
@@ -8,7 +8,38 @@ import statistics
 import sys
 from typing import List, Union, Tuple
 from tqdm import tqdm
-from utils import *
+import utils
+from multiprocessing import Pool
+
+class Polynomial:
+    '''
+    Polynomial class for finding coverage probabilities and calculating expected values.
+    '''
+    def __init__(self, coefficients):
+        # coefficients should be a list representing the coefficients of the polynomial
+        self.coefficients = coefficients
+
+    def __repr__(self):
+        # Returns a string representation of the polynomial
+        return "Polynomial({})".format(self.coefficients)
+
+    def __add__(self, other):
+        # Addition of two polynomials
+        # Pad the coefficients with zeros to make their lengths equal
+        padded_self = self.coefficients + [0] * (len(other.coefficients) - len(self.coefficients))
+        padded_other = other.coefficients + [0] * (len(self.coefficients) - len(other.coefficients))
+        # Add the coefficients element-wise
+        result_coefficients = [a + b for a, b in zip(padded_self, padded_other)]
+        return Polynomial(result_coefficients)
+
+    def __mul__(self, other):
+        # Multiplication of two polynomials
+        result_degree = len(self.coefficients) + len(other.coefficients) - 1
+        result_coefficients = [0] * result_degree
+        for i in range(len(self.coefficients)):
+            for j in range(len(other.coefficients)):
+                result_coefficients[i + j] += self.coefficients[i] * other.coefficients[j]
+        return Polynomial(result_coefficients)
 
 def verify_baits(
     ids: List[str],
@@ -18,7 +49,8 @@ def verify_baits(
     seed_length: int = 10,
     rc: bool = False,
     log: str = None,
-    exact: bool = False
+    exact: bool = False,
+    num_cores = 1
 ) -> int:
     '''
     Arguments:
@@ -29,7 +61,8 @@ def verify_baits(
         seed_length (int): Seed length to be used in the seed and extend algorithm.
         rc (bool): If True, reverse complements will be used for calculating coverage.
         log (str): If not None, the process will log its progress to the specified path.
-        exact (bool): If True, will use brute force alignment to align baits instead of seed-and-extend.
+        exact (bool): If True, will use naive alignment to align baits instead of seed-and-extend.    
+        num_cores (int): If greater than 1, will parallelize naive alignment.
     '''
     if log is not None:
         verbose = True
@@ -44,27 +77,27 @@ def verify_baits(
         verbose = False
 
     if isinstance(s, list):
-        seqlens = calculate_seqlens(s)
+        seqlens = utils.calculate_seqlens(s)
         s = ''.join(s)
     else:
         seqlens = [len(s)]
         
     sa = divsufsort(s)
-    alignment_function = brute_force_alignment # for using exact matching
+    alignment_function = utils.naive_alignment # for using exact matching
     if not exact:
-        alignment_function = seed_and_extend # otherwise
+        alignment_function = utils.seed_and_extend # otherwise
     
     length = len(s)
     cov = [False] * length
     l = len(baits[0])
-    ignore = initialize_ignore_vector(seqlens, l)
+    ignore = utils.initialize_ignore_vector(seqlens, l)
     if verbose:
         f.write('Initialized integer array and ignore vector with length {}\n'.format(length))
     for id, bait in zip(ids, baits):
         if verbose:
             f.write('Aligning bait {}.\n'.format(id))
-        matches = alignment_function(s, bait, d, ignore, sa = sa)
-        coverages = calculate_coverage(matches, l)
+        matches = alignment_function(s, bait, d, ignore, sa = sa, num_cores = num_cores)
+        coverages = utils.calculate_coverage(matches, l)
         if verbose:
             f.write('Bait covers between:\n {}\n'.format(coverages))
         for c in coverages:
@@ -85,7 +118,8 @@ def calculate_redundancy(
     seed_length: int = 10,
     rc: bool = False,
     log: str = None,
-    exact: bool = False
+    exact: bool = False,
+    num_cores = 1
 ):
     '''
     Given a list of sequences and a solution bait set, returns an integer vector that indicates
@@ -102,6 +136,7 @@ def calculate_redundancy(
         rc (bool): If True, reverse complements will be used for calculating coverage.
         log (str): If not None, the process will log its progress to the specified path.
         exact (bool): If True, will use brute force alignment to align baits instead of seed-and-extend.
+        num_cores (int): If greater than 1, will parallelize naive alignment.
     '''
     if log is not None:
         verbose = True
@@ -116,29 +151,29 @@ def calculate_redundancy(
         verbose = False
 
     if isinstance(s, list):
-        seqlens = calculate_seqlens(s)
+        seqlens = utils.calculate_seqlens(s)
         s = ''.join(s)
     else:
         seqlens = [len(s)]
 
     sa = divsufsort(s)
     
-    alignment_function = brute_force_alignment # for using exact matching
+    alignment_function = utils.naive_alignment # for using exact matching
     if not exact:
-        alignment_function = seed_and_extend # otherwise
+        alignment_function = utils.seed_and_extend # otherwise
     
     length = len(s)
     cov = [0] * length
     l = len(baits[0])
-    ignore = initialize_ignore_vector(seqlens, l)
+    ignore = utils.initialize_ignore_vector(seqlens, l)
     if verbose:
         f.write('Initialized integer array and ignore vector with length {}\n'.format(length))
 
     for id, bait in zip(ids, baits):
         if verbose:
             f.write('Aligning bait {}.\n'.format(id))
-        matches = alignment_function(s, bait, d, ignore, sa = sa)
-        coverages = calculate_coverage(matches, l)
+        matches = alignment_function(s, bait, d, ignore, sa = sa, num_cores = num_cores)
+        coverages = utils.calculate_coverage(matches, l)
         if verbose:
             f.write('Bait covers between:\n {}\n'.format(coverages))
         for c in coverages:
@@ -156,6 +191,20 @@ def calculate_redundancy(
         f.close()
     return cov
 
+def coverage_to_workload(id, expected_cov):
+    length = len(expected_cov)
+    expected_poly = Polynomial([1 - expected_cov[0], expected_cov[0]]) # expected coverage
+    for i in range(1, length):
+        if expected_cov[i] == 0:
+            continue
+        curr_poly = Polynomial([1 - expected_cov[i], expected_cov[i]])
+        expected_poly = expected_poly * curr_poly
+    expected_coeffs = expected_poly.coefficients
+    workload = 0
+    for i in range(len(expected_coeffs)):
+        workload += i * expected_coeffs[i]
+    return id, workload
+
 def calculate_workloads(
     ids: List[str],
     baits: List[str],
@@ -164,7 +213,8 @@ def calculate_workloads(
     seed_length: int = 10,
     rc: bool = False,
     log: str = None,
-    exact: bool = False
+    exact: bool = False,
+    num_cores = 1
 ):
     '''
     Given a list of sequences and a solution bait set, returns a dictionary that indicates
@@ -181,36 +231,8 @@ def calculate_workloads(
         rc (bool): If True, reverse complements will be used for calculating coverage.
         log (str): If not None, the process will log its progress to the specified path.
         exact (bool): If True, will use brute force alignment to align baits instead of seed-and-extend.
+        num_cores (int): If greater than 1, will parallelize naive alignment.
     '''
-    class Polynomial:
-        '''
-        Polynomial class for finding coverage probabilities and calculating expected values.
-        '''
-        def __init__(self, coefficients):
-            # coefficients should be a list representing the coefficients of the polynomial
-            self.coefficients = coefficients
-    
-        def __repr__(self):
-            # Returns a string representation of the polynomial
-            return "Polynomial({})".format(self.coefficients)
-    
-        def __add__(self, other):
-            # Addition of two polynomials
-            # Pad the coefficients with zeros to make their lengths equal
-            padded_self = self.coefficients + [0] * (len(other.coefficients) - len(self.coefficients))
-            padded_other = other.coefficients + [0] * (len(self.coefficients) - len(other.coefficients))
-            # Add the coefficients element-wise
-            result_coefficients = [a + b for a, b in zip(padded_self, padded_other)]
-            return Polynomial(result_coefficients)
-    
-        def __mul__(self, other):
-            # Multiplication of two polynomials
-            result_degree = len(self.coefficients) + len(other.coefficients) - 1
-            result_coefficients = [0] * result_degree
-            for i in range(len(self.coefficients)):
-                for j in range(len(other.coefficients)):
-                    result_coefficients[i + j] += self.coefficients[i] * other.coefficients[j]
-            return Polynomial(result_coefficients)
     
     if log is not None:
         verbose = True
@@ -225,20 +247,20 @@ def calculate_workloads(
         verbose = False
 
     if isinstance(s, list):
-        seqlens = calculate_seqlens(s)
+        seqlens = utils.calculate_seqlens(s)
         s = ''.join(s)
     else:
         seqlens = [len(s)]
 
     length = len(s)
     l = len(baits[0])
-    ignore = initialize_ignore_vector(seqlens, l)
+    ignore = utils.initialize_ignore_vector(seqlens, l)
 
     sa = divsufsort(s)
     
-    alignment_function = brute_force_alignment # for using exact matching
+    alignment_function = utils.naive_alignment # for using exact matching
     if not exact:
-        alignment_function = seed_and_extend # otherwise
+        alignment_function = utils.seed_and_extend # otherwise
 
     coverage_vectors = {}
     workloads = {}
@@ -246,31 +268,28 @@ def calculate_workloads(
         coverage_vectors[id] = np.zeros(length)
         if verbose:
             f.write('Aligning bait {}.\n'.format(id))
-        matches = alignment_function(s, bait, d, ignore, sa = sa)
-        coverages = calculate_coverage(matches, l)
+        matches = alignment_function(s, bait, d, ignore, sa = sa, num_cores = num_cores)
+        coverages = utils.calculate_coverage(matches, l)
         if verbose:
             f.write('Bait covers between:\n {}\n'.format(coverages))
         for c in coverages:
             for i in range(c[0], c[1]):
                 coverage_vectors[id][i] = 1
+    print('Calculated coverages!')
     coverage_sum = np.sum(list(coverage_vectors.values()), axis = 0)
-    if 0 in coverage_sum:
-        print('There are indices that are not covered!')
+    where = np.where(coverage_sum == 0)[0]
+    print('Uncovered indices: ' + str(where))
+    for i in where:
+        if ignore[i] == True:
+            print(str(i) + ' was meant to be ignored.')
+    
     coverage_sum[coverage_sum == 0] = 1
-    for id, bait in tqdm(zip(ids, baits), desc = 'Computing workloads', unit = 'baits'):
-        workloads[id] = 0
-        expected_cov = coverage_vectors[id] / coverage_sum
-        expected_poly = Polynomial([1 - expected_cov[0], expected_cov[0]]) # expected coverage
-        for i in range(1, length):
-            if expected_cov[i] == 0:
-                continue
-            curr_poly = Polynomial([1 - expected_cov[i], expected_cov[i]])
-            expected_poly = expected_poly * curr_poly
-        expected_coeffs = expected_poly.coefficients
-        for i in range(len(expected_coeffs)):
-            workloads[id] += i * expected_coeffs[i]
-        if verbose:
-            f.write('Expected workload of bait {} is {} indices.\n'.format(id, workloads[id]))
+    # for id, bait in tqdm(zip(ids, baits), desc = 'Computing workloads', unit = 'baits'):
+    args = [(id, coverage_vectors[id] / coverage_sum) for id in ids]
+    with Pool(num_cores) as pool:
+        results = pool.starmap(coverage_to_workload, args)
+    for result in results:
+        workloads[result[0]] = result[1]
     return workloads
     
 def calculate_coverages(
@@ -281,7 +300,8 @@ def calculate_coverages(
     seed_length: int = 10,
     rc: bool = False,
     log: str = None,
-    exact: bool = False
+    exact: bool = False,
+    num_cores = 1
 ):
     '''
     Given a list of sequences and a solution bait set, returns a dictionary that indicates
@@ -298,6 +318,7 @@ def calculate_coverages(
         rc (bool): If True, reverse complements will be used for calculating coverage.
         log (str): If not None, the process will log its progress to the specified path.
         exact (bool): If True, will use brute force alignment to align baits instead of seed-and-extend.
+        num_cores (int): If greater than 1, will parallelize naive alignment.
     '''
     if log is not None:
         verbose = True
@@ -312,19 +333,19 @@ def calculate_coverages(
         verbose = False
 
     if isinstance(s, list):
-        seqlens = calculate_seqlens(s)
+        seqlens = utils.calculate_seqlens(s)
         s = ''.join(s)
     else:
         seqlens = [len(s)]
 
     sa = divsufsort(s)
     
-    alignment_function = brute_force_alignment # for using exact matching
+    alignment_function = utils.naive_alignment # for using exact matching
     if not exact:
-        alignment_function = seed_and_extend # otherwise
+        alignment_function = utils.seed_and_extend # otherwise
         
     l = len(baits[0])
-    ignore = initialize_ignore_vector(seqlens, l)
+    ignore = utils.initialize_ignore_vector(seqlens, l)
 
     result = {}
     for id in ids:
@@ -334,8 +355,8 @@ def calculate_coverages(
         if verbose:
             f.write('Aligning bait {}.\n'.format(ids[i]))
         l = len(bait)
-        matches = alignment_function(s, bait, d, ignore, sa)
-        coverages = calculate_coverage(matches, l)
+        matches = alignment_function(s, bait, d, ignore, sa = sa, num_cores = num_cores)
+        coverages = utils.calculate_coverage(matches, l)
         if verbose:
             f.write('Bait covers between:\n {}\n'.format(coverages))
         for c in coverages:
@@ -358,8 +379,9 @@ if __name__ == '__main__':
         output = sys.argv[5]
         rc = int(sys.argv[6]) > 0
         exact = int(sys.argv[7]) > 0
-        ids, baits = sequences_from_fasta(bpath)
-        _, sequences = sequences_from_fasta(spath)
+        num_cores = int(sys.argv[8])
+        ids, baits = read_sequences(bpath)
+        _, sequences = read_sequences(spath)
         vec = calculate_redundancy(
             ids,
             baits,
@@ -368,45 +390,19 @@ if __name__ == '__main__':
             seed_length = 10,
             rc = rc,
             log = output[:output.rfind('.')] + '.log',
-            exact = exact
+            exact = exact,
+            num_cores = num_cores
         )
-        plt.plot(vec, '-')
-        plt.xlabel('Indices')
-        plt.ylabel('Coverage')
-        plt.yticks(range(max(vec) + 1))
-        plt.title('Redundancy analysis of {} with {}'.format(
-            os.path.basename(spath), 
-            os.path.basename(bpath)
-        ))
-        plt.savefig(output)
-        
-    elif option == 'fairness':
-        bpath = sys.argv[2]
-        spath = sys.argv[3]
-        d = int(sys.argv[4])
-        output = sys.argv[5]
-        rc = int(sys.argv[6]) > 0
-        exact = int(sys.argv[7]) > 0
-        ids, baits = sequences_from_fasta(bpath)
-        _, sequences = sequences_from_fasta(spath)
-        coverages = calculate_fairness(
-            ids,
-            baits,
-            sequences,
-            d,
-            seed_length = 10,
-            rc = rc,
-            log = output[:output.rfind('.')] + '.log',
-            exact = exact
-        )
-        
-        # Write the dictionary to a CSV file
-        with open(output, 'w', newline='') as file:
-            writer = csv.writer(file)
-            writer.writerow(['Bait ID', 'Coverage'])
-            for key, value in coverages.items():
-                writer.writerow([key, value])
-
+        np.savetxt(output, np.array(vec))
+        # plt.plot(vec, '-')
+        # plt.xlabel('Indices')
+        # plt.ylabel('Coverage')
+        # plt.yticks(range(max(vec) + 1))
+        # plt.title('Redundancy analysis of {} with {}'.format(
+        #     os.path.basename(spath), 
+        #     os.path.basename(bpath)
+        # ))
+        # plt.savefig(output)
     elif option == 'workloads':
         bpath = sys.argv[2]
         spath = sys.argv[3]
@@ -414,8 +410,9 @@ if __name__ == '__main__':
         output = sys.argv[5]
         rc = int(sys.argv[6]) > 0
         exact = int(sys.argv[7]) > 0
-        ids, baits = sequences_from_fasta(bpath)
-        _, sequences = sequences_from_fasta(spath)
+        num_cores = int(sys.argv[8])
+        ids, baits = read_sequences(bpath)
+        _, sequences = read_sequences(spath)
         workloads = calculate_workloads(
             ids,
             baits,
@@ -424,7 +421,8 @@ if __name__ == '__main__':
             seed_length = 10,
             rc = rc,
             log = output[:output.rfind('.')] + '.log',
-            exact = exact
+            exact = exact,
+            num_cores = num_cores
         )
         
         # Write the dictionary to a CSV file
@@ -441,8 +439,9 @@ if __name__ == '__main__':
         output = sys.argv[5]
         rc = int(sys.argv[6]) > 0
         exact = int(sys.argv[7]) > 0
-        ids, baits = sequences_from_fasta(bpath)
-        _, sequences = sequences_from_fasta(spath)
+        num_cores = int(sys.argv[8])
+        ids, baits = read_sequences(bpath)
+        _, sequences = read_sequences(spath)
         uncovered = verify_baits(
             ids,
             baits,
@@ -451,14 +450,15 @@ if __name__ == '__main__':
             seed_length = 10,
             rc = rc,
             log = output[:output.rfind('.')] + '.log',
-            exact = exact
+            exact = exact,
+            num_cores = num_cores
         )
         
         # Write the dictionary to a CSV file
         if len(uncovered) > 0:
             print(os.path.basename(bpath), uncovered)
     else:
-        print('moe')
+        print('Invalid option:', option)
     
         
     

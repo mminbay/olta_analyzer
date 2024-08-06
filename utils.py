@@ -1,5 +1,7 @@
-import os
+import ctypes
 import multiprocessing as mp
+from multiprocessing import Pool
+import os
 from pydivsufsort import divsufsort, sa_search
 from typing import List, Tuple, Set
 
@@ -59,7 +61,25 @@ def update_ignore_vector(
         if streak >= l:
             ignore[i - l + 1] = True
 
-def brute_force_alignment(
+def naive_wrapper(
+    i: int,
+    chars_per_core: int,
+    seq: str,
+    bait: str,
+    d: int,
+    ignore: List[bool]
+):
+    l_b = len(bait)
+    matches = []
+    for j in range(chars_per_core):
+        if ignore[j]:
+            continue
+        if hamming_decide(bait, seq[j: j + l_b], d):
+            curr = j + (i * chars_per_core)
+            matches.append(curr)
+    return matches
+    
+def naive_alignment(
     seq: str,
     bait: str,
     d: int,
@@ -67,25 +87,39 @@ def brute_force_alignment(
     **kwargs
 ) -> List[int]:
     '''
-    Compute coverages in the brute-force way.
+    Compute coverages in the naive way.
 
     Arguments:
-        seq (str): Sequence to search for the baits in. 
+        seq (str): Sequence to search for the bait in. 
         bait (str): Bait to search for.
         d (int): Allowed Hamming distance for each match.
         ignore (list[boolean]): Indices that have True entries in this list will not be
             aligned. This should be used to mark indices that would cover concatenation spots or 
             already covered s.t. another alignment would not increase the coverage.
-        **kwargs is just provided so the function has the same signature as seed_and_extend.
+        **kwargs:
+            num_cores (int): If greater than 1, will parallelize to provided number of cores.
     '''
-    final_matches = []
-    l = len(bait)
-    for i in range(len(seq)):
-        if ignore[i]:
-            continue
-        if hamming_decide(bait, seq[i: i + l], d):
-            final_matches.append(i)
-    return final_matches
+    num_cores = 1
+    if 'num_cores' in kwargs.keys():
+        num_cores = kwargs['num_cores']
+        
+    l_s = len(seq)
+    l_b = len(bait)
+    chars_per_core = l_s // num_cores
+
+    individual_args = [(
+        i,
+        chars_per_core,
+        seq[i * chars_per_core: (i + 1) * chars_per_core + l_b - 1],
+        bait,
+        d,
+        ignore[i * chars_per_core: (i + 1) * chars_per_core]
+    ) for i in range(num_cores)]
+
+    with Pool(num_cores) as pool:
+        results = pool.starmap(naive_wrapper, individual_args)
+
+    return [match for result in results for match in result]
 
 def seed_and_extend(
     seq: str,
@@ -142,6 +176,7 @@ def seed_and_extend(
                 final_matches.append(actual_start)
     for i in modified_indices: # revert the indices ignored for this iteration
         ignore[i] = False
+
     return final_matches
 
 def hamming_distance(str1, str2) -> int:
@@ -174,7 +209,7 @@ def hamming_decide(str1, str2, d) -> bool:
 def calculate_seqlens(seqs: List[str]) -> List[int]:
     return [len(seq) for seq in seqs]
 
-def calculate_coverage(subs, l) -> List[Tuple[int, int]]:
+def calculate_coverage(subs: List[int], l: int) -> List[Tuple[int, int]]:
     '''
     Given a list of substring starting indices and substring length, return an actual list of starting and ending indices for the coverage of these substrings.
     Example: suppose we have subs = [5, 10, 15, 45], l = 10. These cover from [5, 25] and [45, 55]

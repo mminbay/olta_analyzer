@@ -2,6 +2,9 @@
 Analyzer used for OLTA (https://github.com/FuelTheBurn/generative-bait-clustering)
 
 # Usage
+## Getting started
+We recommend using a [conda environment](https://conda.io/projects/conda/en/latest/user-guide/getting-started.html) to manage the dependencies of the analyzer. Once conda is set up, you can create an environment using the command `conda env create --name NAME --file dependencies.yaml`, where `NAME` is replaced by your preferred name for the environment.
+
 ## Postprocessing analyses
 `postprocessing.py` has the functions for redundancy and workload analyses. You can run the analyses as follows:
 
@@ -15,9 +18,15 @@ Arguments:
 *  `output`: The path where the analysis result will be outputted. Redundancy analyses require a `.txt` extension file, as the output will be a vector where each entry indicates how many baits in the solution set cover that respective position in the input sequence(s). Workload analyses require a `.csv` extension, as the output will be a table indicating the expected workload of each bait. See the original paper for the definitions of these terms.
 *  `rcomp`: Currently non-functional. An integer greater than 0 will consider reverse complement alignments of the baits.
 *  `exact`: Using an integer greater than 0 will use the brute-force algorithm for calculating bait alignments. Using 0 will use the seed-and-extend alignment. We recommend using the brute-force algorithm when analyzing baits produced by OLTA.
-*  `n_cores`: Number of processes to be used if using the brute-force alignment.
+*  `n_cores`: Number of processes to be used if using the naive alignment.
 
 ### Example
+
+`example_bait` contains a bait set that was produced by OLTA for the synthetic sequence `synth_data/L500000_RL(120,240)_RC50_RE40_no0.fasta`. To do a redundancy analysis with exact alignment using 8 processors, we can run the following command:
+```
+$ python postprocessing.py redundancy example_bait/L500000_RL\(120\,240\)_RC50_RE40_no0_baits.txt synth_data/L500000_RL\(120\,240\)_RC50_RE40_no0.fasta 40 example_output.txt 0 1 8
+```
+The resulting numpy array will be outputted to `example_output.txt`.
 
 ## Sequence synthesizing
 `wrappers.py` wraps the function for synthesizing sequences with controlled repetitions. You can use this functionality as follows:
@@ -41,4 +50,4 @@ Running this command will generate a sequence with 50000 nucleotides. Half of th
 ### Notes
 As the repeat coverage grows beyond 0.5, it becomes increasingly likely that the algorithm will result in a dead end, i.e. there will be no more contiguous empty regions to place repetitions despite not having reached the desired fraction. Multiple attempts might be necessary to synthesize such sequences.
 
-Using a repeat coverage of 1.0 will just concatenate the imperfect copies instead of planting them into an empty sequence.s
+Using a repeat coverage of 1.0 will just concatenate the imperfect copies instead of planting them into an empty sequence.
